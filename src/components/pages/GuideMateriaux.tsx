@@ -38,7 +38,9 @@ export default function GuideMateriaux() {
                         <ArrowLeft size={14} /> Accueil
                     </Link>
                     <span className="font-mono tracking-[0.3em] text-sm text-red-400 text-glow font-bold">KAEMA</span>
-                    <Link to="/prestations"><Button size="sm" variant="outline">Prestations <ArrowRight size={12} /></Button></Link>
+                    <Link to="/prestations" aria-label="Voir nos prestations">
+                        <Button size="sm" variant="outline" className="px-2 sm:px-3"><span className="hidden min-[380px]:inline">Prestations</span><ArrowRight size={14} /></Button>
+                    </Link>
                 </div>
             </nav>
 
@@ -59,7 +61,7 @@ export default function GuideMateriaux() {
             </header>
 
             <main className="max-w-6xl mx-auto px-4 sm:px-6 py-9 sm:py-12">
-                <div className="flex gap-2 overflow-x-auto pb-2 mb-8" aria-label="Filtrer par catégorie">
+                <div className="min-w-0 max-w-full flex gap-2 overflow-x-auto overscroll-x-contain pb-2 mb-8" aria-label="Filtrer par catégorie">
                     {categories.map((item) => (
                         <button key={item} type="button" onClick={() => setCategory(item)} aria-pressed={category === item}
                             className={`min-h-11 shrink-0 rounded-full border px-4 py-2 text-sm transition-colors ${category === item ? "border-red-400 bg-red-600/20 text-red-200" : "border-red-500/25 text-red-100/60 hover:border-red-400/60"}`}>
