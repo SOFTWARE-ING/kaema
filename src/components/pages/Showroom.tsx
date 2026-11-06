@@ -97,7 +97,7 @@ export default function Showroom() {
     const sellerNumber = BRAND.whatsapp.replace(/\D/g, "");
 
     return (
-        <div className="min-h-screen grid-bg text-red-50">
+        <div className="min-h-screen min-w-0 grid-bg text-red-50">
             <nav className="sticky top-0 z-40 bg-black/70 backdrop-blur-md border-b border-red-500/30">
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
                     <Link to="/" className="flex items-center gap-2 text-xs font-mono tracking-widest uppercase text-red-300/70 hover:text-red-300">
@@ -140,7 +140,7 @@ export default function Showroom() {
                                     <div className="w-full aspect-4/3 bg-red-950/30 flex items-center justify-center"><ShoppingBag size={36} className="text-red-400/40" /></div>
                                 )}
                                 <div className="p-5 flex flex-col flex-1">
-                                    <div className="flex items-start justify-between gap-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-3">
                                         <h2 className="text-lg font-bold text-white">{product.name}</h2>
                                         <span className="text-sm font-bold text-red-300 whitespace-nowrap">{currency.format(product.price)} FCFA</span>
                                     </div>
@@ -164,7 +164,7 @@ export default function Showroom() {
 
             {selected && (
                 <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) closeOrder(); }}>
-                    <Card className="relative w-full max-w-lg p-5 sm:p-7 max-h-[90vh] overflow-y-auto">
+                    <Card className="relative w-full max-w-lg p-4 sm:p-7 max-h-[calc(100dvh-2rem)] overflow-y-auto">
                         <button type="button" onClick={closeOrder} aria-label="Fermer" className="absolute top-3 right-3 p-2 text-red-200/60 hover:text-white"><X size={18} /></button>
                         <h2 className="text-xl font-bold text-white pr-8">Commander {selected.name}</h2>
                         <p className="mt-1 text-sm text-red-100/60">{currency.format(selected.price)} FCFA la pièce</p>

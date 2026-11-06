@@ -119,15 +119,15 @@ export function ShowroomManager() {
                 {products.length === 0 ? <p className="text-sm text-red-100/50">Aucun produit. Ajoutez votre première pièce ci-dessus.</p> : (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                         {products.map((product) => (
-                            <Card key={product.id} className="p-4 flex gap-4">
-                                {product.imageUrl && <img src={product.imageUrl} alt="" className="w-20 h-20 rounded object-cover bg-black/40 shrink-0" />}
+                            <Card key={product.id} className="min-w-0 p-3 sm:p-4 flex gap-3 sm:gap-4">
+                                {product.imageUrl && <img src={product.imageUrl} alt="" className="w-16 h-16 sm:w-20 sm:h-20 rounded object-cover bg-black/40 shrink-0" />}
                                 <div className="flex-1 min-w-0">
-                                    <div className="flex items-start justify-between gap-2">
-                                        <div>
+                                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                        <div className="min-w-0">
                                             <h3 className="font-semibold text-red-100">{product.name}</h3>
                                             <p className="text-xs text-red-300 mt-1">{money.format(product.price)} FCFA · Stock : {product.stock}</p>
                                         </div>
-                                        <span className={`text-[10px] uppercase tracking-wider ${product.published ? "text-emerald-300" : "text-amber-300"}`}>
+                                        <span className={`self-start text-[10px] uppercase tracking-wider ${product.published ? "text-emerald-300" : "text-amber-300"}`}>
                                             {product.published ? "Visible dans le showroom" : "Masqué du showroom"}
                                         </span>
                                     </div>
@@ -160,7 +160,7 @@ export function ShowroomManager() {
                                 <p className="text-xs text-red-300">Total : {money.format(order.total)} FCFA · Délai estimé : {order.deliveryDays} jours</p>
                                 {order.message && <p className="text-xs text-red-100/50">« {order.message} »</p>}
                                 <p className="text-[10px] text-red-100/40">{new Date(order.createdAt).toLocaleString("fr-FR")}</p>
-                                <div className="flex gap-2 pt-1">
+                                <div className="flex flex-wrap gap-2 pt-1">
                                     <Button size="sm" variant="primary" onClick={() => updateOrderStatus(order.id, "confirmee")}><Check size={12} /> Confirmer</Button>
                                     <Button size="sm" variant="outline" onClick={() => updateOrderStatus(order.id, "livree")}>Livrée</Button>
                                     <Button size="sm" variant="ghost" onClick={() => updateOrderStatus(order.id, "annulee")}>Annuler</Button>

@@ -35,7 +35,7 @@ export default function ClientLayout() {
             {/* Sidebar */}
             <aside
                 className={cn(
-                    "fixed lg:sticky top-0 left-0 z-50 h-screen w-64 bg-black/90 lg:bg-black/50 backdrop-blur-xl",
+                    "fixed lg:sticky top-0 left-0 z-50 h-dvh w-64 bg-black/90 lg:bg-black/50 backdrop-blur-xl",
                     "border-r border-red-500/30 flex flex-col transition-transform duration-300",
                     open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
                 )}

@@ -91,8 +91,8 @@ export function Galerie() {
                                 key={c}
                                 onClick={() => setFilter(c)}
                                 className={`px-3 py-1.5 text-[10px] font-mono tracking-widest uppercase rounded border transition-all ${filter === c
-                                        ? "bg-red-600/20 border-red-400 text-red-300 glow-red"
-                                        : "bg-black/40 border-red-500/30 text-red-300/60 hover:border-red-400/60"
+                                    ? "bg-red-600/20 border-red-400 text-red-300 glow-red"
+                                    : "bg-black/40 border-red-500/30 text-red-300/60 hover:border-red-400/60"
                                     }`}
                             >
                                 {c}
@@ -154,9 +154,9 @@ export function Galerie() {
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.9, opacity: 0 }}
                             onClick={(e) => e.stopPropagation()}
-                            className="relative w-full max-w-3xl border border-red-500/40 rounded-lg overflow-hidden bg-black/80"
+                            className="relative w-full max-w-3xl max-h-[calc(100dvh-2rem)] overflow-y-auto border border-red-500/40 rounded-lg bg-black/80"
                         >
-                            <img src={projets[active].image} alt={projets[active].titre} className="w-full max-h-[70vh] object-cover" />
+                            <img src={projets[active].image} alt={projets[active].titre} className="w-full max-h-[55dvh] sm:max-h-[65dvh] object-cover" />
                             <button
                                 onClick={close}
                                 className="absolute top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full bg-black/70 border border-red-500/40 text-red-300 hover:bg-red-600/30 transition-colors"

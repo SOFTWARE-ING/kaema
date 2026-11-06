@@ -11,7 +11,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
                 <select
                     ref={ref}
                     className={cn(
-                        "w-full appearance-none bg-black/60 cursor-pointer active:bg-red-900/95 border border-red-500/40 rounded px-3 py-2 pr-9",
+                        "w-full min-h-11 appearance-none bg-black/60 cursor-pointer active:bg-red-900/95 border border-red-500/40 rounded px-3 py-2 pr-9",
                         "text-sm text-red-400 font-mono",
                         "focus:outline-none focus:border-red-400 focus:shadow-[0_0_10px_rgba(220,38,38,0.5)]",
                         "hover:border-red-400/60 transition-all cursor-pointer",
