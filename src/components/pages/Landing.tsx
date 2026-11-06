@@ -15,6 +15,7 @@ import { Card } from "@/components/ui/Card";
 import { BRAND, WHATSAPP_LINK } from "@/lib/utils/constants";
 import { Specialites } from "@/components/landing/Specialites";
 import { ShowroomPreview } from "@/components/landing/ShowroomPreview";
+import kaemaLogo from "@/assets/kaema-logo.png";
 
 const navigationLinks = [
     { label: "À propos", url: "#apropos", route: false },
@@ -49,7 +50,7 @@ export default function Landing() {
                     <span className="font-mono tracking-[0.3em] text-sm sm:text-base text-red-400 text-glow font-bold">
                         <img
                             className="h-10 w-10 sm:h-12 sm:w-12 lg:h-14 lg:w-14"
-                            src="/src/assets/kaema-logo.png"
+                            src={kaemaLogo}
                             alt="Kaema logo"
                         />
                     </span>
