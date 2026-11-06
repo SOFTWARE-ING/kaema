@@ -71,7 +71,7 @@ export default function Landing() {
                         transition={{ duration: 0.7 }}
                     >
                         <span className="inline-block px-3 py-1 mb-6 text-[10px] font-mono tracking-[0.4em] uppercase text-red-400 border border-red-500/40 rounded-full bg-red-950/30">
-                            Yaoundé · Cameroun · Est. 2026
+                            Yaoundé · Cameroun . 2026
                         </span>
                         <h1 className="text-3xl sm:text-5xl lg:text-7xl font-black tracking-tight leading-tight">
                             <span className="text-red-400 text-glow">KAEMA</span>

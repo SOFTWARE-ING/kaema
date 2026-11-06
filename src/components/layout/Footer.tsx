@@ -26,7 +26,7 @@ export function Footer() {
                         « {BRAND.slogan} »
                     </p>
                     <p className="text-[10px] font-mono tracking-widest uppercase text-red-300/40">
-                        Yaoundé · Cameroun · Est. 2026
+                        Yaoundé · Cameroun . 2026
                     </p>
                 </div>
 

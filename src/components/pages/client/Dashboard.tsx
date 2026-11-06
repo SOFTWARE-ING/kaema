@@ -14,7 +14,7 @@ export default function Dashboard() {
         <div className="space-y-6">
             <div>
                 <h1 className="text-2xl sm:text-3xl font-black text-white">
-                    Bonjour, <span className="text-red-400 text-glow">Client</span>
+                    Bonjour, <span className="text-red-400 text-glow">Mme/M.</span>
                 </h1>
                 <p className="text-xs font-mono tracking-widest uppercase text-red-300/60 mt-2">
                     {BRAND.slogan}
