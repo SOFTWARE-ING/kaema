@@ -11,7 +11,7 @@ RUN bun install --frozen-lockfile
 
 COPY prisma ./prisma
 COPY prisma.config.ts tsconfig.json ./
-RUN bun run db:generate
+RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" bun run db:generate
 
 COPY src ./src
 COPY scripts ./scripts
