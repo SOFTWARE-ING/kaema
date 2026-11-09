@@ -1,13 +1,20 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { useStore, type ShowroomProduct } from "@/lib/store";
+import type { ShowroomProduct } from "@/lib/store";
+import { apiRequest, resolveAssetUrl } from "@/lib/api";
 
 const currency = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
 
 export function ShowroomPreview() {
-    const [products] = useStore<ShowroomProduct[]>("products", []);
+    const [products, setProducts] = useState<ShowroomProduct[]>([]);
+    useEffect(() => {
+        apiRequest<Array<ShowroomProduct & { createdAt: string }>>("/api/showroom/products")
+            .then((items) => setProducts(items.map((item) => ({ ...item, createdAt: new Date(item.createdAt).getTime() }))))
+            .catch(() => setProducts([]));
+    }, []);
     const featuredProducts = products.filter((product) => product.published).slice(0, 3);
 
     return (
@@ -26,7 +33,7 @@ export function ShowroomPreview() {
                         {featuredProducts.map((product) => (
                             <Link key={product.id} to="/showroom" className="block group">
                                 <Card className="overflow-hidden h-full hover:border-red-400/60 transition-colors">
-                                    {product.imageUrl ? <img src={product.imageUrl} alt={product.name} loading="lazy" className="w-full aspect-4/3 object-cover bg-black/40 group-hover:scale-[1.02] transition-transform" /> : <div className="aspect-4/3 flex items-center justify-center bg-red-950/30"><ShoppingBag className="text-red-400/50" size={32} /></div>}
+                                    {product.imageUrl ? <img src={resolveAssetUrl(product.imageUrl)} alt={product.name} loading="lazy" className="w-full aspect-4/3 object-cover bg-black/40 group-hover:scale-[1.02] transition-transform" /> : <div className="aspect-4/3 flex items-center justify-center bg-red-950/30"><ShoppingBag className="text-red-400/50" size={32} /></div>}
                                     <div className="p-4 flex justify-between items-start gap-3">
                                         <div><h3 className="font-semibold text-red-100">{product.name}</h3><p className="mt-1 text-xs text-red-100/50">{product.stock ? `${product.stock} disponible${product.stock > 1 ? "s" : ""}` : "Sur commande"}</p></div>
                                         <span className="text-sm font-bold text-red-300 whitespace-nowrap">{currency.format(product.price)} FCFA</span>

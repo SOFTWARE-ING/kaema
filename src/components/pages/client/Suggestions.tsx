@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ThumbsUp, Send, Lightbulb, Filter } from "lucide-react";
 import { Card } from "@/components/ui/Card";
@@ -6,32 +6,49 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Textarea } from "@/components/ui/Textarea";
-import { useStore, uid, type Suggestion } from "@/lib/store";
+import type { Suggestion } from "@/lib/store";
+import { apiRequest } from "@/lib/api";
 
 const categories = ["Tous", "Design", "Rénovation", "Service", "Autre"];
 
 export default function Suggestions() {
-    const [suggestions, setSuggestions] = useStore<Suggestion[]>("suggestions", []);
+    const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
     const [filter, setFilter] = useState("Tous");
     const [form, setForm] = useState({ auteur: "", contenu: "", categorie: "Design" });
 
-    const submit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!form.contenu.trim()) return;
-        const s: Suggestion = {
-            id: uid(),
-            auteur: form.auteur.trim() || "Anonyme",
-            contenu: form.contenu.trim(),
-            categorie: form.categorie,
-            votes: 0,
-            createdAt: Date.now(),
-        };
-        setSuggestions((prev) => [s, ...prev]);
-        setForm({ auteur: "", contenu: "", categorie: "Design" });
+    const reload = async () => {
+        const records = await apiRequest<Array<{ id: string; author: string; content: string; category: string; votes: number; createdAt: string }>>("/api/suggestions");
+        startTransition(() => setSuggestions(records.map((s) => ({ id: s.id, auteur: s.author, contenu: s.content, categorie: s.category, votes: s.votes, createdAt: new Date(s.createdAt).getTime() }))));
     };
 
-    const vote = (id: string) => {
-        setSuggestions((prev) => prev.map((s) => (s.id === id ? { ...s, votes: s.votes + 1 } : s)));
+    useEffect(() => {
+        reload().catch(() => setError("Impossible de charger les suggestions. Vérifiez que l’API est démarrée."));
+    }, []);
+
+    const submit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!form.contenu.trim()) return;
+        setLoading(true);
+        setError("");
+        try {
+            await apiRequest("/api/suggestions", { method: "POST", body: JSON.stringify({ author: form.auteur.trim() || "Anonyme", content: form.contenu.trim(), category: form.categorie }) });
+            await reload();
+            setForm({ auteur: "", contenu: "", categorie: "Design" });
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : "La suggestion n’a pas pu être publiée.");
+        } finally { setLoading(false); }
+    };
+
+    const vote = async (id: string) => {
+        setError("");
+        try {
+            await apiRequest(`/api/suggestions/${id}/vote`, { method: "POST" });
+            await reload();
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : "Le vote n’a pas pu être enregistré.");
+        }
     };
 
     const visible = useMemo(
@@ -67,7 +84,7 @@ export default function Suggestions() {
                         >
                             {categories.filter((c) => c !== "Tous").map((c) => <option key={c}>{c}</option>)}
                         </Select>
-                        <Button type="submit" disabled={!form.contenu.trim()}>
+                        <Button type="submit" disabled={!form.contenu.trim() || loading}>
                             <Send size={14} /> Publier
                         </Button>
                     </div>
@@ -80,6 +97,8 @@ export default function Suggestions() {
                     />
                 </form>
             </Card>
+
+            {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
 
             {/* FILTRES */}
             <div className="flex items-center gap-2 flex-wrap">

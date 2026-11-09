@@ -1,58 +1,53 @@
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { Send, Sparkles, User } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { useStore, uid, type ChatMessage } from "@/lib/store";
-
-const AUTO_REPLIES = [
-    "Merci pour votre message ! Un conseiller KAEMA vous répond sous peu.",
-    "Bien reçu. Pouvez-vous préciser la pièce concernée ?",
-    "Nous prenons note. Un devis détaillé peut être préparé sur demande.",
-];
+import type { ChatMessage } from "@/lib/store";
+import { apiRequest } from "@/lib/api";
 
 export default function Chat() {
-    const [messages, setMessages] = useStore<ChatMessage[]>("chat", [
-        {
-            id: "welcome",
-            from: "admin",
-            auteur: "KAEMA",
-            texte: "Bienvenue sur le canal KAEMA. Comment pouvons-nous vous aider aujourd'hui ?",
-            createdAt: Date.now(),
-        },
-    ]);
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [text, setText] = useState("");
+    const [error, setError] = useState("");
+    const [sending, setSending] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
+
+    const reload = useCallback(async () => {
+        const result = await apiRequest<{ messages: Array<{ id: string; senderRole: string; text: string; createdAt: string }> }>("/api/client/chat/messages");
+        const nextMessages = result.messages.map((message): ChatMessage => ({
+            id: message.id,
+            from: message.senderRole === "ADMIN" ? "admin" : "client",
+            auteur: message.senderRole === "ADMIN" ? "KAEMA" : "Vous",
+            texte: message.text,
+            createdAt: new Date(message.createdAt).getTime(),
+        }));
+        startTransition(() => setMessages(nextMessages));
+    }, []);
+
+    useEffect(() => {
+        reload().catch(() => setError("Impossible de joindre le chat. Vérifiez que l’API est démarrée."));
+        const interval = window.setInterval(() => { reload().catch(() => undefined); }, 5000);
+        return () => window.clearInterval(interval);
+    }, [reload]);
 
     useEffect(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
     }, [messages]);
 
-    const send = (e: React.FormEvent) => {
+    const send = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!text.trim()) return;
-        const msg: ChatMessage = {
-            id: uid(),
-            from: "client",
-            auteur: "Vous",
-            texte: text.trim(),
-            createdAt: Date.now(),
-        };
-        setMessages((prev) => [...prev, msg]);
-        setText("");
-
-        // Réponse mock après délai
-        setTimeout(() => {
-            const reply: ChatMessage = {
-                id: uid(),
-                from: "admin",
-                auteur: "KAEMA",
-                texte: AUTO_REPLIES[Math.floor(Math.random() * AUTO_REPLIES.length)],
-                createdAt: Date.now(),
-            };
-            setMessages((prev) => [...prev, reply]);
-        }, 1200);
+        setSending(true);
+        setError("");
+        try {
+            await apiRequest("/api/client/chat/messages", { method: "POST", body: JSON.stringify({ text: text.trim() }) });
+            setText("");
+            await reload();
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : "Le message n’a pas pu être envoyé.");
+        } finally { setSending(false); }
     };
 
     return (
@@ -68,6 +63,7 @@ export default function Chat() {
 
             <Card className="flex flex-col h-[65vh] sm:h-[70vh]">
                 <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {messages.length === 0 && <p className="text-sm text-red-100/50">Bienvenue sur le canal KAEMA. Comment pouvons-nous vous aider aujourd’hui ?</p>}
                     {messages.map((m) => (
                         <motion.div
                             key={m.id}
@@ -98,11 +94,12 @@ export default function Chat() {
                         className="flex-1"
                         aria-label="Écrivez votre message"
                     />
-                    <Button type="submit" disabled={!text.trim()} size="md">
+                    <Button type="submit" disabled={!text.trim() || sending} size="md">
                         <Send size={14} />
                     </Button>
                 </form>
             </Card>
+            {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
         </div>
     );
 }

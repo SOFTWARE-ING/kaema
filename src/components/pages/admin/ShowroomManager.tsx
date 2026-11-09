@@ -1,62 +1,77 @@
-import { useState, type FormEvent } from "react";
+import { startTransition, useEffect, useState, type FormEvent } from "react";
 import { Check, Eye, EyeOff, PackagePlus, Pencil, ShoppingBag, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
-import { useStore, uid, type ProductOrder, type ShowroomProduct } from "@/lib/store";
+import type { ProductOrder, ShowroomProduct } from "@/lib/store";
 import { useToast } from "@/components/ui/Toast";
+import { apiRequest, resolveAssetUrl } from "@/lib/api";
 
 const emptyForm = { name: "", description: "", price: "", imageUrl: "", stock: "1" };
 const money = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
 
 export function ShowroomManager() {
-    const [products, setProducts] = useStore<ShowroomProduct[]>("products", []);
-    const [orders, setOrders] = useStore<ProductOrder[]>("orders", []);
+    const [products, setProducts] = useState<ShowroomProduct[]>([]);
+    const [orders, setOrders] = useState<ProductOrder[]>([]);
     const [form, setForm] = useState(emptyForm);
+    const [imageFile, setImageFile] = useState<File | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const { push } = useToast();
 
-    const saveProduct = (event: FormEvent<HTMLFormElement>) => {
+    const reload = async () => {
+        const [productRecords, orderRecords] = await Promise.all([
+            apiRequest<Array<ShowroomProduct & { createdAt: string }>>("/api/admin/products", {}, true),
+            apiRequest<Array<ProductOrder & { createdAt: string; status: string }>>("/api/admin/orders", {}, true),
+        ]);
+        const nextProducts = productRecords.map((product) => ({ ...product, createdAt: new Date(product.createdAt).getTime() }));
+        const nextOrders = orderRecords.map((order) => ({
+                ...order,
+                createdAt: new Date(order.createdAt).getTime(),
+                status: ({ NEW: "nouvelle", CONFIRMED: "confirmee", DELIVERED: "livree", CANCELLED: "annulee" } as const)[order.status as "NEW" | "CONFIRMED" | "DELIVERED" | "CANCELLED"],
+            }));
+        startTransition(() => { setProducts(nextProducts); setOrders(nextOrders); });
+    };
+
+    useEffect(() => { reload().catch((cause) => push({ kind: "error", title: "Chargement impossible", message: cause instanceof Error ? cause.message : "Réessayez." })); }, [push]);
+
+    const saveProduct = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         const price = Number(form.price);
         const stock = Number(form.stock);
         if (!form.name.trim() || !form.description.trim() || !Number.isFinite(price) || price <= 0 || !Number.isInteger(stock) || stock < 0) return;
 
-        if (editingId) {
-            const existingProduct = products.find((product) => product.id === editingId);
-            setProducts((current) => current.map((product) => product.id === editingId
-                ? { ...product, name: form.name.trim(), description: form.description.trim(), price, imageUrl: form.imageUrl.trim(), stock }
-                : product));
-            push({
-                kind: "success",
-                title: "Modifications enregistrées",
-                message: existingProduct?.published ? "Le produit reste visible dans le showroom." : "Le produit reste masqué. Vous pouvez le mettre en ligne depuis sa fiche.",
-            });
-        } else {
-            setProducts((current) => [{
-                id: uid(),
-                name: form.name.trim(),
-                description: form.description.trim(),
-                price,
-                imageUrl: form.imageUrl.trim(),
-                stock,
-                published: true,
-                createdAt: Date.now(),
-            }, ...current]);
-            push({ kind: "success", title: "Produit publié", message: "Il est maintenant visible dans le showroom et sur l’accueil." });
+        try {
+            let imageUrl = form.imageUrl.trim();
+            if (imageFile) {
+                const imageData = new FormData();
+                imageData.append("file", imageFile);
+                const uploaded = await apiRequest<{ imageUrl: string }>("/api/admin/uploads/products", { method: "POST", body: imageData }, true);
+                imageUrl = uploaded.imageUrl;
+            }
+            const payload = { name: form.name.trim(), description: form.description.trim(), price, imageUrl, stock, ...(editingId ? {} : { published: true }) };
+            await apiRequest(editingId ? `/api/admin/products/${editingId}` : "/api/admin/products", { method: editingId ? "PATCH" : "POST", body: JSON.stringify(payload) }, true);
+            await reload();
+            push(editingId
+                ? { kind: "success", title: "Modifications enregistrées", message: "Le produit a été mis à jour." }
+                : { kind: "success", title: "Produit publié", message: "Il est maintenant visible dans le showroom." });
+        } catch (cause) {
+            push({ kind: "error", title: "Enregistrement impossible", message: cause instanceof Error ? cause.message : "Réessayez." });
+            return;
         }
         setForm(emptyForm);
+        setImageFile(null);
         setEditingId(null);
     };
 
     const editProduct = (product: ShowroomProduct) => {
         setEditingId(product.id);
         setForm({ name: product.name, description: product.description, price: String(product.price), imageUrl: product.imageUrl, stock: String(product.stock) });
+        setImageFile(null);
         window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
-    const togglePublished = (id: string) => {
+    const togglePublished = async (id: string) => {
         const product = products.find((item) => item.id === id);
         if (!product) {
             push({ kind: "error", title: "Produit introuvable", message: "Actualisez la console puis réessayez." });
@@ -64,23 +79,34 @@ export function ShowroomManager() {
         }
 
         const published = !product.published;
-        setProducts((current) => current.map((item) => item.id === id ? { ...item, published } : item));
-        push(published
-            ? { kind: "success", title: "Produit publié", message: "Il est visible dans le showroom et sur l’accueil." }
-            : { kind: "info", title: "Produit masqué", message: "Il n’apparaît plus dans le showroom public." });
+        try {
+            await apiRequest(`/api/admin/products/${id}`, { method: "PATCH", body: JSON.stringify({ published }) }, true);
+            await reload();
+            push(published
+                ? { kind: "success", title: "Produit publié", message: "Il est visible dans le showroom." }
+                : { kind: "info", title: "Produit masqué", message: "Il n’apparaît plus dans le showroom public." });
+        } catch (cause) { push({ kind: "error", title: "Mise à jour impossible", message: cause instanceof Error ? cause.message : "Réessayez." }); }
     };
 
-    const deleteProduct = (id: string) => {
-        setProducts((current) => current.filter((product) => product.id !== id));
-        push({ kind: "warning", title: "Produit supprimé", message: "Il a été retiré du showroom." });
+    const deleteProduct = async (id: string) => {
+        try {
+            await apiRequest(`/api/admin/products/${id}`, { method: "DELETE" }, true);
+            await reload();
+            push({ kind: "warning", title: "Produit supprimé", message: "Il a été retiré du showroom." });
+        } catch (cause) { push({ kind: "error", title: "Suppression impossible", message: cause instanceof Error ? cause.message : "Réessayez." }); }
         if (editingId === id) {
             setEditingId(null);
             setForm(emptyForm);
         }
     };
 
-    const updateOrderStatus = (id: string, status: ProductOrder["status"]) =>
-        setOrders((current) => current.map((order) => order.id === id ? { ...order, status } : order));
+    const updateOrderStatus = async (id: string, status: ProductOrder["status"]) => {
+        const apiStatus = ({ nouvelle: "NEW", confirmee: "CONFIRMED", livree: "DELIVERED", annulee: "CANCELLED" } as const)[status];
+        try {
+            await apiRequest(`/api/admin/orders/${id}`, { method: "PATCH", body: JSON.stringify({ status: apiStatus }) }, true);
+            await reload();
+        } catch (cause) { push({ kind: "error", title: "Commande non modifiée", message: cause instanceof Error ? cause.message : "Réessayez." }); }
+    };
 
     return (
         <div className="space-y-8">
@@ -88,7 +114,7 @@ export function ShowroomManager() {
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
                     <PackagePlus size={18} className="text-red-400" /> {editingId ? "Modifier la pièce" : "Ajouter une pièce au showroom"}
                 </h2>
-                <p className="mt-1 mb-5 text-xs text-red-100/50">Après l’enregistrement, le produit est publié et visible dans le showroom. Vous pourrez le retirer de la vitrine à tout moment. Pour l’image, ajoutez une URL accessible publiquement.</p>
+                <p className="mt-1 mb-5 text-xs text-red-100/50">Après l’enregistrement, le produit est publié et visible dans le showroom. Vous pourrez le retirer de la vitrine à tout moment. Les images sont stockées sur le serveur; seul leur chemin est conservé en base.</p>
                 <form onSubmit={saveProduct} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <label className="text-xs text-red-200/80">Nom du produit
                         <Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required maxLength={100} className="mt-1" />
@@ -99,15 +125,17 @@ export function ShowroomManager() {
                     <label className="text-xs text-red-200/80">Pièces disponibles
                         <Input type="number" min="0" step="1" value={form.stock} onChange={(event) => setForm({ ...form, stock: event.target.value })} required className="mt-1" />
                     </label>
-                    <label className="text-xs text-red-200/80">URL de l’image (facultatif)
-                        <Input type="url" value={form.imageUrl} onChange={(event) => setForm({ ...form, imageUrl: event.target.value })} placeholder="https://…" className="mt-1" />
+                    <label className="text-xs text-red-200/80">Image du produit (facultatif)
+                        <Input type="file" accept="image/jpeg,image/png,image/webp,image/avif" onChange={(event) => setImageFile(event.target.files?.[0] ?? null)} className="mt-1 file:mr-3 file:rounded file:border-0 file:bg-red-900/70 file:px-3 file:py-1 file:text-red-50" />
+                        <span className="mt-1 block text-[11px] text-red-100/40">JPEG, PNG, WebP ou AVIF · 8 Mo maximum{imageFile ? ` · ${imageFile.name}` : form.imageUrl ? " · Image actuelle conservée si aucun nouveau fichier n’est choisi" : ""}</span>
+                        {!imageFile && form.imageUrl && <img src={resolveAssetUrl(form.imageUrl)} alt="Image actuelle du produit" className="mt-2 h-16 w-16 rounded object-cover" />}
                     </label>
                     <label className="text-xs text-red-200/80 sm:col-span-2">Description
                         <Textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} required maxLength={1200} rows={4} className="mt-1" />
                     </label>
                     <div className="sm:col-span-2 flex flex-wrap gap-2">
                         <Button type="submit">{editingId ? "Enregistrer les modifications" : "Ajouter le produit"}</Button>
-                        {editingId && <Button type="button" variant="ghost" onClick={() => { setEditingId(null); setForm(emptyForm); }}>Annuler</Button>}
+                        {editingId && <Button type="button" variant="ghost" onClick={() => { setEditingId(null); setForm(emptyForm); setImageFile(null); }}>Annuler</Button>}
                     </div>
                 </form>
             </Card>
@@ -120,7 +148,7 @@ export function ShowroomManager() {
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                         {products.map((product) => (
                             <Card key={product.id} className="min-w-0 p-3 sm:p-4 flex gap-3 sm:gap-4">
-                                {product.imageUrl && <img src={product.imageUrl} alt="" className="w-16 h-16 sm:w-20 sm:h-20 rounded object-cover bg-black/40 shrink-0" />}
+                                {product.imageUrl && <img src={resolveAssetUrl(product.imageUrl)} alt="" className="w-16 h-16 sm:w-20 sm:h-20 rounded object-cover bg-black/40 shrink-0" />}
                                 <div className="flex-1 min-w-0">
                                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                                         <div className="min-w-0">
@@ -160,11 +188,14 @@ export function ShowroomManager() {
                                 <p className="text-xs text-red-300">Total : {money.format(order.total)} FCFA · Délai estimé : {order.deliveryDays} jours</p>
                                 {order.message && <p className="text-xs text-red-100/50">« {order.message} »</p>}
                                 <p className="text-[10px] text-red-100/40">{new Date(order.createdAt).toLocaleString("fr-FR")}</p>
-                                <div className="flex flex-wrap gap-2 pt-1">
+                                {order.status === "nouvelle" && <div className="flex flex-wrap gap-2 pt-1">
                                     <Button size="sm" variant="primary" onClick={() => updateOrderStatus(order.id, "confirmee")}><Check size={12} /> Confirmer</Button>
-                                    <Button size="sm" variant="outline" onClick={() => updateOrderStatus(order.id, "livree")}>Livrée</Button>
                                     <Button size="sm" variant="ghost" onClick={() => updateOrderStatus(order.id, "annulee")}>Annuler</Button>
-                                </div>
+                                </div>}
+                                {order.status === "confirmee" && <div className="flex flex-wrap gap-2 pt-1">
+                                    <Button size="sm" variant="outline" onClick={() => updateOrderStatus(order.id, "livree")}>Marquer livrée</Button>
+                                    <Button size="sm" variant="ghost" onClick={() => updateOrderStatus(order.id, "annulee")}>Annuler</Button>
+                                </div>}
                             </Card>
                         ))}
                     </div>

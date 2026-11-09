@@ -1,12 +1,13 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import {
-    LayoutDashboard, Calendar, MessageSquare, MessagesSquare, LogOut, Menu, X, Cpu,
+    LayoutDashboard, Calendar, MessageSquare, MessagesSquare, LogOut, Menu, X, Cpu, UserRound,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils/utils";
 import { BRAND } from "@/lib/utils/constants";
 import { Button } from "@/components/ui/Button";
+import { apiRequest, ACCESS_TOKEN_KEY } from "@/lib/api";
 
 const links = [
     { to: "/client", label: "Tableau de bord", icon: LayoutDashboard, end: true },
@@ -68,11 +69,19 @@ export default function ClientLayout() {
                             <l.icon size={16} /> {l.label}
                         </NavLink>
                     ))}
+                    <NavLink to="/client/login" onClick={() => setOpen(false)} className={({ isActive }) => cn("flex items-center gap-3 px-3 py-2.5 rounded-md text-xs font-mono tracking-widest uppercase transition-all", isActive ? "bg-red-600/20 text-red-300 border border-red-500/50" : "text-red-200/60 hover:text-red-200 hover:bg-red-950/30 border border-transparent")}>
+                        <UserRound size={16} /> Mon compte
+                    </NavLink>
                 </nav>
 
                 <div className="p-3 border-t border-red-500/20">
                     <Button
-                        onClick={() => navigate("/")}
+                        onClick={async () => {
+                            try { await apiRequest("/api/auth/logout", { method: "POST" }); } catch { /* la session locale est supprimée même si l’API est indisponible */ }
+                            sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+                            sessionStorage.removeItem("kaema.role");
+                            navigate("/");
+                        }}
                         variant="ghost"
                         size="sm"
                         className="w-full justify-start text-red-300/70 hover:text-red-200 hover:bg-red-950/30"

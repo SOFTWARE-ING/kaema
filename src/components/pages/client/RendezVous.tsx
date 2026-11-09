@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { motion } from "motion/react";
 import { Calendar, Clock, Mail, MessageCircle, MessagesSquare, Loader2 } from "lucide-react";
@@ -12,14 +12,21 @@ import { Textarea } from "@/components/ui/Textarea";
 import { useToast } from "@/components/ui/Toast";
 import { BRAND, WHATSAPP_LINK } from "@/lib/utils/constants";
 import { SERVICES } from "@/lib/prestations";
-import { useStore, uid, type RendezVous } from "@/lib/store";
+import { useStore, type RendezVous } from "@/lib/store";
+import { apiRequest } from "@/lib/api";
 
 const creneaux = ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00"];
+const EMPTY_RDVS: RendezVous[] = [];
+const tomorrowLocal = () => {
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+};
 
 export default function RendezVousPage() {
     const [searchParams] = useSearchParams();
     const initialService = SERVICES.find((service) => service.slug === searchParams.get("service"))?.titre ?? SERVICES[0].titre;
-    const [rdvs, setRdvs] = useStore<RendezVous[]>("rdv", []);
+    const [rdvs, setRdvs] = useStore<RendezVous[]>("rdv", EMPTY_RDVS);
     const [form, setForm] = useState({
         nom: "",
         contact: "",
@@ -31,24 +38,45 @@ export default function RendezVousPage() {
     const [loading, setLoading] = useState<"mail" | "whatsapp" | "chat" | null>(null);
     const { push } = useToast();
 
+    useEffect(() => {
+        if (sessionStorage.getItem("kaema.role") !== "CLIENT") return;
+        apiRequest<Array<{ id: string; clientName: string; contact: string; service: string; date: string; slot: string; message: string; channel: string; status: string; createdAt: string }>>("/api/client/appointments")
+            .then((records) => setRdvs(records.map((record): RendezVous => ({
+                id: record.id, clientNom: record.clientName, clientContact: record.contact, service: record.service,
+                date: record.date.slice(0, 10), creneau: record.slot, message: record.message,
+                canal: ({ EMAIL: "mail", WHATSAPP: "whatsapp", CHAT: "chat", WEBSITE: "chat" } as const)[record.channel as "EMAIL" | "WHATSAPP" | "CHAT" | "WEBSITE"],
+                statut: ({ PENDING: "en_attente", CONFIRMED: "confirme", CANCELLED: "annule" } as const)[record.status as "PENDING" | "CONFIRMED" | "CANCELLED"],
+                createdAt: new Date(record.createdAt).getTime(),
+            }))))
+            .catch(() => undefined);
+    }, [setRdvs]);
+
     const reset = () =>
         setForm({ nom: "", contact: "", service: initialService, date: "", creneau: creneaux[1], message: "" });
 
     const buildSummary = () =>
         `RDV KAEMA — ${form.service}\nClient : ${form.nom}\nContact : ${form.contact}\nDate : ${form.date} à ${form.creneau}\nNote : ${form.message || "—"}`;
 
-    const persist = (canal: RendezVous["canal"]): RendezVous => {
+    const persist = async (canal: RendezVous["canal"]): Promise<RendezVous> => {
+        const record = await apiRequest<{ id: string; clientName: string; contact: string; service: string; date: string; slot: string; message: string; channel: string; status: string; createdAt: string }>("/api/appointments", {
+            method: "POST",
+            body: JSON.stringify({
+                clientName: form.nom.trim(), contact: form.contact.trim(), service: form.service,
+                date: form.date, slot: form.creneau, message: form.message.trim(),
+                channel: canal === "mail" ? "EMAIL" : canal === "whatsapp" ? "WHATSAPP" : "CHAT",
+            }),
+        });
         const rdv: RendezVous = {
-            id: uid(),
-            clientNom: form.nom || "Anonyme",
-            clientContact: form.contact,
-            service: form.service,
-            date: form.date,
-            creneau: form.creneau,
-            message: form.message,
+            id: record.id,
+            clientNom: record.clientName,
+            clientContact: record.contact,
+            service: record.service,
+            date: record.date.slice(0, 10),
+            creneau: record.slot,
+            message: record.message,
             canal,
-            statut: "en_attente",
-            createdAt: Date.now(),
+            statut: record.status === "CONFIRMED" ? "confirme" : record.status === "CANCELLED" ? "annule" : "en_attente",
+            createdAt: new Date(record.createdAt).getTime(),
         };
         setRdvs((prev) => [rdv, ...prev]);
         return rdv;
@@ -56,53 +84,48 @@ export default function RendezVousPage() {
 
     const isValid = form.nom.trim() && form.contact.trim() && form.date;
 
-    const handleMail = () => {
+    const handleMail = async () => {
         if (!isValid) return;
         setLoading("mail");
-        persist("mail");
-        const subject = encodeURIComponent(`[KAEMA] Demande de RDV — ${form.service}`);
-        const body = encodeURIComponent(buildSummary());
-        window.location.href = `mailto:${BRAND.email}?subject=${subject}&body=${body}`;
-        setTimeout(() => {
+        try {
+            await persist("mail");
+            const subject = encodeURIComponent(`[KAEMA] Demande de RDV — ${form.service}`);
+            const body = encodeURIComponent(buildSummary());
+            window.location.href = `mailto:${BRAND.email}?subject=${subject}&body=${body}`;
             setLoading(null);
-            push({ kind: "success", title: "Demande envoyée", message: "Vous recevrez une confirmation par mail." });
+            push({ kind: "success", title: "Demande enregistrée", message: "Votre demande est enregistrée. Votre application mail va s’ouvrir." });
             reset();
-        }, 600);
+        } catch (cause) {
+            push({ kind: "error", title: "Envoi impossible", message: cause instanceof Error ? cause.message : "Réessayez dans un instant." });
+        } finally { setLoading(null); }
     };
 
-    const handleWhatsapp = () => {
+    const handleWhatsapp = async () => {
         if (!isValid) return;
         setLoading("whatsapp");
-        persist("whatsapp");
-        window.open(`${WHATSAPP_LINK.split("?")[0]}?text=${encodeURIComponent(buildSummary())}`, "_blank");
-        setTimeout(() => {
+        try {
+            await persist("whatsapp");
+            window.open(`${WHATSAPP_LINK.split("?")[0]}?text=${encodeURIComponent(buildSummary())}`, "_blank", "noopener,noreferrer");
             setLoading(null);
             push({ kind: "success", title: "Demande enregistrée", message: "Redirection vers WhatsApp." });
             reset();
-        }, 600);
+        } catch (cause) {
+            push({ kind: "error", title: "Envoi impossible", message: cause instanceof Error ? cause.message : "Réessayez dans un instant." });
+        } finally { setLoading(null); }
     };
 
-    const handleChat = () => {
+    const handleChat = async () => {
         if (!isValid) return;
         setLoading("chat");
-        persist("chat");
-        // Injecte un message système dans le chat
-        const key = "kaema.chat";
-        const existing = JSON.parse(localStorage.getItem(key) || "[]");
-        const msg = {
-            id: uid(),
-            from: "client",
-            auteur: form.nom,
-            texte: `📅 Demande de RDV\n${buildSummary()}`,
-            createdAt: Date.now(),
-        };
-        localStorage.setItem(key, JSON.stringify([...existing, msg]));
-        window.dispatchEvent(new CustomEvent("kaema:store", { detail: key }));
-        setTimeout(() => {
+        try {
+            await persist("chat");
+            await apiRequest("/api/client/chat/messages", { method: "POST", body: JSON.stringify({ text: `📅 Demande de RDV\n${buildSummary()}` }) });
             setLoading(null);
             push({ kind: "success", title: "Demande ajoutée au chat", message: "L'équipe vous répondra ici." });
             reset();
-        }, 600);
+        } catch (cause) {
+            push({ kind: "error", title: "Envoi impossible", message: cause instanceof Error ? cause.message : "Réessayez dans un instant." });
+        } finally { setLoading(null); }
     };
 
     return (
@@ -153,7 +176,7 @@ export default function RendezVousPage() {
                                     <Input
                                         type="date"
                                         value={form.date}
-                                        min={new Date().toISOString().split("T")[0]}
+                                        min={tomorrowLocal()}
                                         onChange={(e) => setForm({ ...form, date: e.target.value })}
                                         className="pl-9"
                                     />

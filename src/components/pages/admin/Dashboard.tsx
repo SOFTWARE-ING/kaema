@@ -1,45 +1,113 @@
-import { useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import {
-    Calendar, MessageSquare, MessagesSquare, CheckCircle2, XCircle, LogOut, BarChart3, Users, Trash2, Store, ShoppingBag,
+    Calendar, MessageSquare, MessagesSquare, CheckCircle2, XCircle, LogOut, BarChart3, Users, Trash2, Store, ShoppingBag, Eye, Image as ImageIcon,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { useStore, type RendezVous, type Suggestion, type ChatMessage, type ProductOrder, type ShowroomProduct } from "@/lib/store";
-import { AdminBadge } from "./AdminBadge";
+import type { RendezVous, Suggestion } from "@/lib/store";
 import { ShowroomManager } from "./ShowroomManager";
+import { GalleryManager } from "./GalleryManager";
+import { apiRequest, ACCESS_TOKEN_KEY } from "@/lib/api";
 
-type Tab = "rdv" | "suggestions" | "chat" | "showroom";
+type Tab = "rdv" | "suggestions" | "chat" | "showroom" | "gallery";
+type Conversation = { id: string; name: string; email?: string; messages: Array<{ id: string; from: "client" | "admin"; auteur: string; texte: string; createdAt: number }> };
 
 export default function AdminDashboard() {
-    if (!sessionStorage.getItem("kaema.admin")) return <Navigate to="/admin/login" replace />;
-
     const navigate = useNavigate();
+    const [authState, setAuthState] = useState<"checking" | "authorized" | "unauthorized">("checking");
     const [tab, setTab] = useState<Tab>("rdv");
-    const [rdvs, setRdvs] = useStore<RendezVous[]>("rdv", []);
-    const [suggestions, setSuggestions] = useStore<Suggestion[]>("suggestions", []);
-    const [messages] = useStore<ChatMessage[]>("chat", []);
-    const [products] = useStore<ShowroomProduct[]>("products", []);
-    const [orders] = useStore<ProductOrder[]>("orders", []);
+    const [rdvs, setRdvs] = useState<RendezVous[]>([]);
+    const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+    const [conversations, setConversations] = useState<Conversation[]>([]);
+    const [counts, setCounts] = useState({ rdv: 0, pending: 0, suggestions: 0, chat: 0, products: 0, orders: 0, galleryViews: 0, galleryOrders: 0 });
+    const [chatReply, setChatReply] = useState<Record<string, string>>({});
+    const [error, setError] = useState("");
 
-    const stats = useMemo(
-        () => ({
-            rdv: rdvs.length,
-            pending: rdvs.filter((r) => r.statut === "en_attente").length,
-            suggestions: suggestions.length,
-            chat: messages.filter((m) => m.from === "client").length,
-            products: products.length,
-            orders: orders.filter((order) => order.status === "nouvelle").length,
-        }),
-        [rdvs, suggestions, messages, products, orders]
-    );
+    const reload = useCallback(async () => {
+        const [summary, appointmentRecords, suggestionRecords, conversationRecords] = await Promise.all([
+            apiRequest<{ pendingAppointments: number; newOrders: number; suggestions: number; products: number; clients: number; galleryViews: number; galleryOrders: number }>("/api/admin/dashboard", {}, true),
+            apiRequest<Array<{ id: string; clientName: string; contact: string; service: string; date: string; slot: string; message: string; channel: string; status: string; createdAt: string }>>("/api/admin/appointments", {}, true),
+            apiRequest<Array<{ id: string; author: string; content: string; category: string; _count: { votes: number }; createdAt: string }>>("/api/admin/suggestions", {}, true),
+            apiRequest<Array<{ id: string; user: { name: string; email: string } | null; messages: Array<{ id: string; senderRole: string; text: string; createdAt: string }> }>>("/api/admin/conversations", {}, true),
+        ]);
+        const mappedAppointments = appointmentRecords.map((record): RendezVous => ({
+            id: record.id, clientNom: record.clientName, clientContact: record.contact,
+            service: record.service, date: record.date.slice(0, 10), creneau: record.slot, message: record.message,
+            canal: ({ EMAIL: "mail", WHATSAPP: "whatsapp", CHAT: "chat", WEBSITE: "chat" } as const)[record.channel as "EMAIL" | "WHATSAPP" | "CHAT" | "WEBSITE"],
+            statut: ({ PENDING: "en_attente", CONFIRMED: "confirme", CANCELLED: "annule" } as const)[record.status as "PENDING" | "CONFIRMED" | "CANCELLED"],
+            createdAt: new Date(record.createdAt).getTime(),
+        }));
+        const mappedSuggestions = suggestionRecords.map((record): Suggestion => ({
+            id: record.id, auteur: record.author, contenu: record.content, categorie: record.category,
+            votes: record._count.votes, createdAt: new Date(record.createdAt).getTime(),
+        }));
+        const mappedConversations = conversationRecords.map((conversation): Conversation => ({
+            id: conversation.id, name: conversation.user?.name ?? "Visiteur", email: conversation.user?.email,
+            messages: conversation.messages.map((message) => ({
+                id: message.id, from: message.senderRole === "ADMIN" ? "admin" : "client",
+                auteur: message.senderRole === "ADMIN" ? "KAEMA" : (conversation.user?.name ?? "Visiteur"),
+                texte: message.text, createdAt: new Date(message.createdAt).getTime(),
+            })),
+        }));
+        const nextCounts = {
+            rdv: mappedAppointments.length, pending: summary.pendingAppointments, suggestions: summary.suggestions,
+            chat: mappedConversations.reduce((sum, conversation) => sum + conversation.messages.filter((message) => message.from === "client").length, 0),
+            products: summary.products, orders: summary.newOrders, galleryViews: summary.galleryViews, galleryOrders: summary.galleryOrders,
+        };
+        startTransition(() => {
+            setRdvs(mappedAppointments);
+            setSuggestions(mappedSuggestions);
+            setConversations(mappedConversations);
+            setCounts(nextCounts);
+        });
+        setError("");
+    }, []);
 
-    const setRdvStatus = (id: string, statut: RendezVous["statut"]) =>
-        setRdvs((prev) => prev.map((r) => (r.id === id ? { ...r, statut } : r)));
+    useEffect(() => {
+        let active = true;
+        apiRequest<{ role: string }>("/api/auth/me", {}, true)
+            .then((user) => { if (active) setAuthState(user.role === "ADMIN" ? "authorized" : "unauthorized"); })
+            .catch(() => { if (active) setAuthState("unauthorized"); });
+        return () => { active = false; };
+    }, []);
 
-    const deleteRdv = (id: string) => setRdvs((prev) => prev.filter((r) => r.id !== id));
-    const deleteSuggestion = (id: string) => setSuggestions((prev) => prev.filter((s) => s.id !== id));
+    useEffect(() => {
+        if (authState !== "authorized") return;
+        void Promise.resolve().then(reload).catch((cause) => console.error("Chargement du tableau de bord impossible", cause));
+        const interval = window.setInterval(() => { reload().catch(() => undefined); }, 8000);
+        return () => window.clearInterval(interval);
+    }, [authState, reload]);
+
+    const setRdvStatus = async (id: string, statut: RendezVous["statut"]) => {
+        const status = ({ en_attente: "PENDING", confirme: "CONFIRMED", annule: "CANCELLED" } as const)[statut];
+        try { await apiRequest(`/api/admin/appointments/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }, true); await reload(); }
+        catch (cause) { setError(cause instanceof Error ? cause.message : "Le rendez-vous n’a pas pu être modifié."); }
+    };
+
+    const deleteRdv = async (id: string) => {
+        try { await apiRequest(`/api/admin/appointments/${id}`, { method: "DELETE" }, true); await reload(); }
+        catch (cause) { setError(cause instanceof Error ? cause.message : "Le rendez-vous n’a pas pu être supprimé."); }
+    };
+
+    const deleteSuggestion = async (id: string) => {
+        try { await apiRequest(`/api/admin/suggestions/${id}`, { method: "DELETE" }, true); await reload(); }
+        catch (cause) { setError(cause instanceof Error ? cause.message : "La suggestion n’a pas pu être supprimée."); }
+    };
+
+    const sendReply = async (conversationId: string) => {
+        const text = chatReply[conversationId]?.trim();
+        if (!text) return;
+        try {
+            await apiRequest(`/api/admin/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ text }) }, true);
+            setChatReply((current) => ({ ...current, [conversationId]: "" }));
+            await reload();
+        } catch (cause) { setError(cause instanceof Error ? cause.message : "Le message n’a pas pu être envoyé."); }
+    };
+
+    if (authState === "checking") return <div className="min-h-screen grid-bg p-8 text-sm text-red-200/70">Vérification de l'accès…</div>;
+    if (authState === "unauthorized") return <Navigate to="/admin/login" replace />;
 
     return (
         <div className="min-h-screen grid-bg p-4 sm:p-6">
@@ -53,25 +121,33 @@ export default function AdminDashboard() {
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
-                    <AdminBadge />
                     <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => { sessionStorage.removeItem("kaema.admin"); navigate("/"); }}
+                        onClick={async () => {
+                            try { await apiRequest("/api/auth/logout", { method: "POST" }); } catch { /* la session locale est révoquée ci-dessous */ }
+                            sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+                            sessionStorage.removeItem("kaema.role");
+                            navigate("/");
+                        }}
                     >
                         <LogOut size={14} /> Quitter
                     </Button>
                 </div>
             </header>
 
+            {error && <p role="alert" className="mb-4 text-sm text-amber-300">{error}</p>}
+
             {/* STATS */}
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
-                <StatCard icon={Calendar} label="RDV" value={stats.rdv} accent="text-amber-400" />
-                <StatCard icon={BarChart3} label="En attente" value={stats.pending} accent="text-orange-400" />
-                <StatCard icon={MessageSquare} label="Suggestions" value={stats.suggestions} accent="text-red-400" />
-                <StatCard icon={MessagesSquare} label="Chats" value={stats.chat} accent="text-emerald-400" />
-                <StatCard icon={Store} label="Produits" value={stats.products} accent="text-violet-400" />
-                <StatCard icon={ShoppingBag} label="Nouvelles commandes" value={stats.orders} accent="text-pink-400" />
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
+                <StatCard icon={Calendar} label="RDV" value={counts.rdv} accent="text-amber-400" />
+                <StatCard icon={BarChart3} label="En attente" value={counts.pending} accent="text-orange-400" />
+                <StatCard icon={MessageSquare} label="Suggestions" value={counts.suggestions} accent="text-red-400" />
+                <StatCard icon={MessagesSquare} label="Chats" value={counts.chat} accent="text-emerald-400" />
+                <StatCard icon={Store} label="Produits" value={counts.products} accent="text-violet-400" />
+                <StatCard icon={ShoppingBag} label="Nouvelles commandes" value={counts.orders} accent="text-pink-400" />
+                <StatCard icon={Eye} label="Vues galerie" value={counts.galleryViews} accent="text-cyan-400" />
+                <StatCard icon={ImageIcon} label="Demandes galerie" value={counts.galleryOrders} accent="text-rose-400" />
             </div>
 
             {/* TABS */}
@@ -81,6 +157,7 @@ export default function AdminDashboard() {
                     ["suggestions", "Suggestions", MessageSquare],
                     ["chat", "Chat", MessagesSquare],
                     ["showroom", "Showroom", Store],
+                    ["gallery", "Galerie", ImageIcon],
                 ] as const).map(([key, label, Icon]) => (
                     <Button
                         type="button"
@@ -156,27 +233,25 @@ export default function AdminDashboard() {
                 </div>
             )}
 
-            {tab === "chat" && (
-                <Card className="p-4 max-h-[60vh] overflow-y-auto space-y-2">
-                    {messages.length === 0 && <p className="text-xs text-red-200/50 italic">Aucun message.</p>}
-                    {messages.map((m) => (
-                        <div
-                            key={m.id}
-                            className={`p-2 rounded border text-xs ${m.from === "client"
-                                ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-200/90"
-                                : "border-red-500/30 bg-red-500/5 text-red-200/90"
-                                }`}
-                        >
-                            <span className="font-mono uppercase tracking-widest text-[9px] block mb-1 opacity-70">
-                                {m.from} · {m.auteur}
-                            </span>
-                            <p className="whitespace-pre-wrap">{m.texte}</p>
-                        </div>
-                    ))}
-                </Card>
-            )}
+            {tab === "chat" && <div className="space-y-3">
+                {conversations.length === 0 && <p className="text-xs text-red-200/50 italic">Aucune conversation.</p>}
+                {conversations.map((conversation) => <Card key={conversation.id} className="p-4 space-y-3">
+                    <div><h2 className="font-semibold text-white">{conversation.name}</h2>{conversation.email && <p className="text-xs text-red-100/50">{conversation.email}</p>}</div>
+                    <div className="max-h-72 overflow-y-auto space-y-2">
+                        {conversation.messages.map((message) => <div key={message.id} className={`p-2 rounded border text-xs ${message.from === "client" ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-200/90" : "border-red-500/30 bg-red-500/5 text-red-200/90"}`}>
+                            <span className="font-mono uppercase tracking-widest text-[9px] block mb-1 opacity-70">{message.auteur} · {new Date(message.createdAt).toLocaleString("fr-FR")}</span>
+                            <p className="whitespace-pre-wrap">{message.texte}</p>
+                        </div>)}
+                    </div>
+                    <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void sendReply(conversation.id); }}>
+                        <input className="min-w-0 flex-1 rounded border border-red-500/30 bg-black/40 px-3 py-2 text-sm text-white" value={chatReply[conversation.id] ?? ""} onChange={(event) => setChatReply((current) => ({ ...current, [conversation.id]: event.target.value }))} placeholder="Répondre…" maxLength={4000} />
+                        <Button type="submit" disabled={!chatReply[conversation.id]?.trim()}>Envoyer</Button>
+                    </form>
+                </Card>)}
+            </div>}
 
             {tab === "showroom" && <ShowroomManager />}
+            {tab === "gallery" && <GalleryManager />}
         </div>
     );
 }

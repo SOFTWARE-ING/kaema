@@ -11,10 +11,12 @@ import AdminDashboard from "@/components/pages/admin/Dashboard";
 import SpecialitesPage from "@/components/pages/Specialites";
 import Showroom from "@/components/pages/Showroom";
 import GuideMateriaux from "@/components/pages/GuideMateriaux";
+import GalleryRoute from "@/components/pages/Gallery";
 
 export const router = createBrowserRouter([
     { path: "/", element: <Landing /> },
     { path: "/showroom", element: <Showroom /> },
+    { path: "/galerie", element: <GalleryRoute /> },
     { path: "/guide-materiaux", element: <GuideMateriaux /> },
     { path: "/prestations", element: <SpecialitesPage /> },
     { path: "/specialites", element: <Navigate to="/prestations" replace /> },

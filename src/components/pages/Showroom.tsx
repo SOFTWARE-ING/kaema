@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { startTransition, useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, ArrowRight, MessageCircle, Package, ShoppingBag, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -6,8 +6,9 @@ import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { useSEO } from "@/lib/useSEO";
-import { uid, useStore, type ProductOrder, type ShowroomProduct } from "@/lib/store";
+import type { ShowroomProduct } from "@/lib/store";
 import { BRAND } from "@/lib/utils/constants";
+import { apiRequest, resolveAssetUrl } from "@/lib/api";
 
 const currency = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
 const minimumDeliveryDays = 5;
@@ -24,14 +25,25 @@ function deliveryDate(days: number) {
 }
 
 export default function Showroom() {
-    const [products, setProducts] = useStore<ShowroomProduct[]>("products", []);
-    const [, setOrders] = useStore<ProductOrder[]>("orders", []);
+    const [products, setProducts] = useState<ShowroomProduct[]>([]);
     const [selected, setSelected] = useState<ShowroomProduct | null>(null);
     const [quantity, setQuantity] = useState(1);
     const [customerName, setCustomerName] = useState("");
     const [customerContact, setCustomerContact] = useState("");
     const [message, setMessage] = useState("");
     const [confirmation, setConfirmation] = useState("");
+    const [whatsappOrderUrl, setWhatsappOrderUrl] = useState("");
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
+
+    const reloadProducts = async () => {
+        const records = await apiRequest<Array<ShowroomProduct & { createdAt: string }>>("/api/showroom/products");
+        startTransition(() => setProducts(records.map((product) => ({ ...product, createdAt: new Date(product.createdAt).getTime() }))));
+    };
+
+    useEffect(() => {
+        reloadProducts().catch(() => setError("Le showroom est momentanément indisponible. Réessayez plus tard."));
+    }, []);
 
     useSEO({
         title: "Showroom — KAEMA RÉNO & DESIGN",
@@ -43,6 +55,7 @@ export default function Showroom() {
     const closeOrder = () => {
         setSelected(null);
         setConfirmation("");
+        setWhatsappOrderUrl("");
         setQuantity(1);
         setCustomerName("");
         setCustomerContact("");
@@ -52,45 +65,38 @@ export default function Showroom() {
     const startOrder = (product: ShowroomProduct) => {
         setSelected(product);
         setConfirmation("");
+        setWhatsappOrderUrl("");
         setQuantity(1);
     };
 
-    function submitOrder(event: FormEvent<HTMLFormElement>) {
+    async function submitOrder(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (!selected || !customerName.trim() || !customerContact.trim()) return;
+        setLoading(true);
+        setError("");
+        try {
+            const order = await apiRequest<{ total: number; deliveryDays: number; customerName: string; customerContact: string; message: string; productName: string }>("/api/showroom/orders", {
+                method: "POST",
+                body: JSON.stringify({ productId: selected.id, quantity, customerName: customerName.trim(), customerContact: customerContact.trim(), message: message.trim() }),
+            });
+            const deliveryDays = order.deliveryDays;
+            await reloadProducts();
 
-        const deliveryDays = estimateDelivery(quantity);
-        const order: ProductOrder = {
-            id: uid(),
-            productId: selected.id,
-            productName: selected.name,
-            unitPrice: selected.price,
-            quantity,
-            total: selected.price * quantity,
-            deliveryDays,
-            customerName: customerName.trim(),
-            customerContact: customerContact.trim(),
-            message: message.trim(),
-            status: "nouvelle",
-            createdAt: Date.now(),
-        };
-        setOrders((previous) => [order, ...previous]);
-        setProducts((previous) => previous.map((product) => product.id === selected.id
-            ? { ...product, stock: Math.max(0, product.stock - quantity) }
-            : product));
-
-        const orderText = [
-            `Bonjour KAEMA, je souhaite commander : ${selected.name}`,
-            `Quantité : ${quantity}`,
-            `Prix total : ${currency.format(order.total)} FCFA`,
-            `Délai estimatif : ${deliveryDays} jours (à confirmer)`,
-            `Nom : ${order.customerName}`,
-            `Contact : ${order.customerContact}`,
-            order.message ? `Précisions : ${order.message}` : "",
-        ].filter(Boolean).join("\n");
-        const whatsappNumber = BRAND.whatsapp.replace(/\D/g, "");
-        window.open(`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(orderText)}`, "_blank", "noopener,noreferrer");
-        setConfirmation("Votre demande est enregistrée. Envoyez le message WhatsApp qui vient de s’ouvrir pour la confirmer avec le vendeur.");
+            const orderText = [
+                `Bonjour KAEMA, je souhaite commander : ${order.productName}`,
+                `Quantité : ${quantity}`,
+                `Prix total : ${currency.format(order.total)} FCFA`,
+                `Délai estimatif : ${deliveryDays} jours (à confirmer)`,
+                `Nom : ${order.customerName}`,
+                `Contact : ${order.customerContact}`,
+                order.message ? `Précisions : ${order.message}` : "",
+            ].filter(Boolean).join("\n");
+            const whatsappNumber = BRAND.whatsapp.replace(/\D/g, "");
+            setWhatsappOrderUrl(`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(orderText)}`);
+            setConfirmation("Votre demande est enregistrée. Envoyez le message WhatsApp au vendeur pour la confirmer.");
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : "La commande n’a pas pu être enregistrée.");
+        } finally { setLoading(false); }
     }
 
     const sellerText = encodeURIComponent("Bonjour KAEMA, je souhaite en savoir plus sur les produits du showroom.");
@@ -121,6 +127,7 @@ export default function Showroom() {
             </header>
 
             <main className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
+                {error && <p role="alert" className="mb-5 text-sm text-amber-300 text-center">{error}</p>}
                 {publishedProducts.length === 0 ? (
                     <Card className="p-8 sm:p-12 text-center max-w-2xl mx-auto">
                         <Package size={32} className="mx-auto text-red-400/70 mb-4" />
@@ -135,7 +142,7 @@ export default function Showroom() {
                         {publishedProducts.map((product) => (
                             <Card key={product.id} className="overflow-hidden flex flex-col">
                                 {product.imageUrl ? (
-                                    <img src={product.imageUrl} alt={product.name} loading="lazy" className="w-full aspect-4/3 object-cover bg-black/40" />
+                                    <img src={resolveAssetUrl(product.imageUrl)} alt={product.name} loading="lazy" className="w-full aspect-4/3 object-cover bg-black/40" />
                                 ) : (
                                     <div className="w-full aspect-4/3 bg-red-950/30 flex items-center justify-center"><ShoppingBag size={36} className="text-red-400/40" /></div>
                                 )}
@@ -171,6 +178,7 @@ export default function Showroom() {
                         {confirmation ? (
                             <div className="mt-5 space-y-4">
                                 <p className="text-sm text-emerald-300">{confirmation}</p>
+                                <a href={whatsappOrderUrl} target="_blank" rel="noreferrer noopener"><Button variant="outline"><MessageCircle size={14} /> Ouvrir WhatsApp</Button></a>
                                 <Button onClick={closeOrder}>Terminer</Button>
                             </div>
                         ) : (
@@ -192,7 +200,7 @@ export default function Showroom() {
                                 <label className="block text-xs text-red-200/80">Précisions (facultatif)
                                     <Textarea value={message} onChange={(event) => setMessage(event.target.value)} maxLength={500} rows={3} className="mt-1" />
                                 </label>
-                                <Button type="submit" className="w-full"><ShoppingBag size={14} /> Envoyer la commande</Button>
+                                <Button type="submit" className="w-full" disabled={loading}><ShoppingBag size={14} /> {loading ? "Enregistrement…" : "Envoyer la commande"}</Button>
                             </form>
                         )}
                     </Card>

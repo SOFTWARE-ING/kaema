@@ -1,36 +1,23 @@
-HEAD
-# kaema
-Design &amp; Deco
-# React + TypeScript + Vite
+# KAEMA RÉNO & DESIGN
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Application web de présentation des prestations de rénovation et de design d'intérieur à Yaoundé. Le frontend est réalisé avec React, TypeScript et Vite; l'API dédiée est dans [`backend/`](backend/README.md) et utilise Bun, ElysiaJS, Prisma et PostgreSQL. La connexion admin est raccordée à l'API.
 
-Currently, two official plugins are available:
+## Frontend
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+bun install
+bun run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
-b665844 (Initial commit)
+## API
+
+Copier `.env.example` vers `.env` à la racine pour régler `VITE_API_URL`, puis voir [`backend/README.md`](backend/README.md) pour la configuration PostgreSQL, les secrets, le démarrage et les routes métier.
+
+Les parcours rendez-vous, compte client, suggestions, chat, commandes showroom, gestion admin et galerie images/vidéos sont reliés à l'API. FFmpeg convertit les formats vidéo importés en MP4 lisible dans les navigateurs; les vidéos sont ensuite servies en streaming par segments. Installer FFmpeg sur le serveur API.
+
+## Déploiement
+
+- Le frontend est une application statique Vite à publier sur Cloudflare Pages; `public/_redirects` active le routage SPA. Utiliser `bun install --frozen-lockfile`, `bun run build`, le dossier de sortie `dist`, et définir `VITE_API_URL` à l'URL publique de l'API avant le build.
+- L'API se construit depuis `backend/Dockerfile`; l'image embarque Bun et FFmpeg et applique les migrations Prisma au démarrage.
+- Fournir les variables de `backend/.env.example` dans l'hébergeur. Les médias doivent vivre sur un volume persistant monté au chemin `backend/uploads` (ou être migrés vers un stockage objet) : le disque temporaire d'un conteneur ne conserve pas les fichiers après remplacement.
+- Après avoir créé le compte administrateur initial, utiliser les migrations et scripts de seed documentés dans `backend/README.md`; ne pas conserver le mot de passe d'exemple.

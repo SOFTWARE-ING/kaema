@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 /* ---------- Types ---------- */
 export type RendezVous = {
@@ -101,13 +101,13 @@ export function useStore<T>(key: keyof typeof KEYS, fallback: T) {
     };
   }, [key, fallback]);
 
-  const update = (next: T | ((prev: T) => T)) => {
+  const update = useCallback((next: T | ((prev: T) => T)) => {
     setData((prev) => {
       const value = typeof next === "function" ? (next as (p: T) => T)(prev) : next;
       write(KEYS[key], value);
       return value;
     });
-  };
+  }, [key]);
 
   return [data, update] as const;
 }
