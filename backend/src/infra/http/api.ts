@@ -1,15 +1,15 @@
 import { Elysia, t } from "elysia";
 import { cors } from "@elysia/cors";
 import { openapi } from "@elysia/openapi";
-import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, unlink } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { dirname, extname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { extname, resolve } from "node:path";
 import { AuthService } from "../../application/auth-service";
 import { CommerceService } from "../../application/commerce-service";
 import { badRequest, conflict, forbidden, notFound, serviceUnavailable, unauthorized } from "../../domain/errors";
 import { prismaRepository } from "../persistence/prisma-repository";
 import { bearer, hashGuestKey, verifyAccessToken } from "../../shared/security";
+import { readMedia, removeMedia, saveMedia, saveMediaFile } from "../storage/media-storage";
 
 const db = prismaRepository.client;
 const authService = new AuthService(prismaRepository);
@@ -18,8 +18,7 @@ const originList = (process.env.CORS_ORIGIN ?? "http://localhost:5173").split(",
 const cookieSameSite = (process.env.COOKIE_SAME_SITE ?? "Strict").toLowerCase();
 if (!["strict", "lax", "none"].includes(cookieSameSite)) throw new Error("COOKIE_SAME_SITE doit valoir Strict, Lax ou None.");
 const fixedWindow = new Map<string, { count: number; resetAt: number }>();
-const productImageDirectory = resolve(process.env.PRODUCT_IMAGE_DIR ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../uploads/products"));
-const galleryMediaDirectory = resolve(process.env.GALLERY_MEDIA_DIR ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../../uploads/gallery"));
+const galleryTempDirectory = resolve(process.env.GALLERY_TEMP_DIR ?? "/tmp/kaema-gallery");
 const imageFormats = {
   "image/jpeg": { extension: "jpg", signature: (bytes: Uint8Array) => bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff },
   "image/png": { extension: "png", signature: (bytes: Uint8Array) => bytes.subarray(0, 8).join(",") === "137,80,78,71,13,10,26,10" },
@@ -38,7 +37,7 @@ function galleryFilename(mediaPath: string, mediaType: "IMAGE" | "VIDEO") {
 
 async function removeGalleryFile(mediaPath: string, mediaType: "IMAGE" | "VIDEO") {
   const filename = galleryFilename(mediaPath, mediaType);
-  if (filename) await unlink(resolve(galleryMediaDirectory, filename)).catch(() => undefined);
+  if (filename) await removeMedia("gallery", filename).catch(() => undefined);
 }
 
 function transcodeVideo(source: string, destination: string) {
@@ -151,30 +150,21 @@ export const api = new Elysia({ name: "kaema-api" })
   .get("/health", () => ({ status: "ok", service: "kaema-api", timestamp: new Date().toISOString() }), { detail: { summary: "État de santé de l'API" } })
   .get("/uploads/products/:filename", async ({ params, set }) => {
     if (!/^[\da-f-]{36}\.(?:jpg|png|webp|avif)$/.test(params.filename)) throw notFound("Image introuvable.");
-    const image = Bun.file(resolve(productImageDirectory, params.filename));
-    if (!await image.exists()) throw notFound("Image introuvable.");
     const extension = params.filename.split(".").at(-1);
     const contentType = ({ jpg: "image/jpeg", png: "image/png", webp: "image/webp", avif: "image/avif" } as const)[extension as "jpg" | "png" | "webp" | "avif"];
     set.headers["Cache-Control"] = "public, max-age=31536000, immutable";
     set.headers["X-Content-Type-Options"] = "nosniff";
-    return new Response(image, { headers: { "Content-Type": contentType } });
+    const image = await readMedia("products", params.filename, contentType, null);
+    if (!image) throw notFound("Image introuvable.");
+    return image;
   }, { detail: { summary: "Afficher une image du showroom" } })
   .get("/uploads/gallery/:filename", async ({ params, request }) => {
     if (!/^[\da-f-]{36}\.(?:jpg|png|webp|avif|mp4|webm)$/.test(params.filename)) throw notFound("Média introuvable.");
-    const media = Bun.file(resolve(galleryMediaDirectory, params.filename));
-    if (!await media.exists()) throw notFound("Média introuvable.");
     const extension = params.filename.split(".").at(-1);
     const contentType = ({ jpg: "image/jpeg", png: "image/png", webp: "image/webp", avif: "image/avif", mp4: "video/mp4", webm: "video/webm" } as const)[extension as "jpg" | "png" | "webp" | "avif" | "mp4" | "webm"];
-    const commonHeaders = { "Content-Type": contentType, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff" };
-    const range = request.headers.get("range");
-    if (!range) return new Response(media, { headers: commonHeaders });
-    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-    if (!match || media.size === 0) return new Response(null, { status: 416, headers: { ...commonHeaders, "Content-Range": `bytes */${media.size}` } });
-    const suffixLength = match[1] ? 0 : Number(match[2]);
-    const start = match[1] ? Number(match[1]) : Math.max(media.size - suffixLength, 0);
-    const end = match[2] && match[1] ? Math.min(Number(match[2]), media.size - 1) : media.size - 1;
-    if (start > end || start >= media.size) return new Response(null, { status: 416, headers: { ...commonHeaders, "Content-Range": `bytes */${media.size}` } });
-    return new Response(media.slice(start, end + 1), { status: 206, headers: { ...commonHeaders, "Content-Length": String(end - start + 1), "Content-Range": `bytes ${start}-${end}/${media.size}` } });
+    const media = await readMedia("gallery", params.filename, contentType, request.headers.get("range"));
+    if (!media) throw notFound("Média introuvable.");
+    return media;
   }, { detail: { summary: "Servir les images et vidéos de la galerie avec prise en charge du streaming HTTP Range" } })
   .group("/api", (app) => app
     .group("/auth", (auth) => auth
@@ -283,27 +273,24 @@ export const api = new Elysia({ name: "kaema-api" })
           if (file.size > 8 * 1024 * 1024) throw badRequest("L'image ne doit pas dépasser 8 Mo.");
           const format = imageFormats[file.type as keyof typeof imageFormats];
           if (!format) throw badRequest("Formats image acceptés : JPEG, PNG, WebP ou AVIF.");
-          const bytes = new Uint8Array(await file.arrayBuffer());
+          const bytes = new Uint8Array(await file.slice(0, 16).arrayBuffer());
           if (!format.signature(bytes)) throw badRequest("Le fichier ne correspond pas à une image valide.");
-          await mkdir(galleryMediaDirectory, { recursive: true });
           const filename = `${crypto.randomUUID()}.${format.extension}`;
-          await writeFile(resolve(galleryMediaDirectory, filename), bytes, { flag: "wx" });
+          await saveMedia("gallery", filename, file, file.type);
           return { mediaPath: `/uploads/gallery/${filename}`, mediaType: "IMAGE" };
         }
         if (!file.type.startsWith("video/") && file.type !== "application/octet-stream" && file.type !== "") throw badRequest("Choisissez un fichier image ou vidéo reconnu.");
         const extension = extname(file.name).slice(1).toLowerCase();
         if (!/^[a-z0-9]{2,8}$/.test(extension)) throw badRequest("Le fichier vidéo doit avoir une extension valide.");
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        await mkdir(galleryMediaDirectory, { recursive: true });
+        await mkdir(galleryTempDirectory, { recursive: true });
         const mediaId = crypto.randomUUID();
-        const sourcePath = resolve(galleryMediaDirectory, `${mediaId}.upload`);
-        const temporaryOutput = resolve(galleryMediaDirectory, `${mediaId}.processing.mp4`);
+        const sourcePath = resolve(galleryTempDirectory, `${mediaId}.upload`);
+        const temporaryOutput = resolve(galleryTempDirectory, `${mediaId}.processing.mp4`);
         const finalFilename = `${mediaId}.mp4`;
-        const finalPath = resolve(galleryMediaDirectory, finalFilename);
         try {
-          await writeFile(sourcePath, bytes, { flag: "wx" });
+          await Bun.write(sourcePath, file);
           await transcodeVideo(sourcePath, temporaryOutput);
-          await rename(temporaryOutput, finalPath);
+          await saveMediaFile("gallery", finalFilename, temporaryOutput, "video/mp4");
         } finally {
           await Promise.all([unlink(sourcePath).catch(() => undefined), unlink(temporaryOutput).catch(() => undefined)]);
         }
@@ -317,11 +304,10 @@ export const api = new Elysia({ name: "kaema-api" })
         const file = body.file;
         const format = imageFormats[file.type as keyof typeof imageFormats];
         if (!format) throw badRequest("Format non pris en charge. Utilisez JPEG, PNG, WebP ou AVIF.");
-        const bytes = new Uint8Array(await file.arrayBuffer());
+        const bytes = new Uint8Array(await file.slice(0, 16).arrayBuffer());
         if (!format.signature(bytes)) throw badRequest("Le fichier ne correspond pas à une image valide.");
-        await mkdir(productImageDirectory, { recursive: true });
         const filename = `${crypto.randomUUID()}.${format.extension}`;
-        await writeFile(resolve(productImageDirectory, filename), bytes, { flag: "wx" });
+        await saveMedia("products", filename, file, file.type);
         return { imageUrl: `/uploads/products/${filename}` };
       }, {
         body: t.Object({ file: t.File({ type: ["image/jpeg", "image/png", "image/webp", "image/avif"], maxSize: "8m" }) }),

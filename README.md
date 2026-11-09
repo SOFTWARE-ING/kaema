@@ -18,6 +18,6 @@ Les parcours rendez-vous, compte client, suggestions, chat, commandes showroom, 
 ## Déploiement
 
 - Le frontend est une application statique Vite à publier sur Netlify; `netlify.toml` règle le build et `public/_redirects` active le routage SPA. Définir `VITE_API_URL` avec l'URL publique de l'API dans les variables de l'hébergeur avant le build.
-- L'API se construit depuis `backend/Dockerfile`; l'image embarque Bun et FFmpeg et applique les migrations Prisma au démarrage.
-- Fournir les variables de `backend/.env.example` dans l'hébergeur. Les médias doivent vivre sur un volume persistant monté au chemin `backend/uploads` (ou être migrés vers un stockage objet) : le disque temporaire d'un conteneur ne conserve pas les fichiers après remplacement.
+- L'API se construit depuis `backend/Dockerfile`; le blueprint `render.yaml` configure Render Free, l'image embarque Bun et FFmpeg et applique les migrations Prisma au démarrage.
+- Le service Render gratuit utilise un disque temporaire. Les images et vidéos sont donc envoyées vers le stockage objet Tigris avec les variables S3 de `backend/.env.example`; la base ne conserve que leur chemin. La conversion FFmpeg et le streaming HTTP Range restent assurés par l'API.
 - Après avoir créé le compte administrateur initial, utiliser les migrations et scripts de seed documentés dans `backend/README.md`; ne pas conserver le mot de passe d'exemple.

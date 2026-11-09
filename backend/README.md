@@ -33,6 +33,8 @@ L'API écoute sur `http://localhost:3001`. L'interface OpenAPI est disponible à
 | `PORT` | Port HTTP, défaut `3001` |
 | `PRODUCT_IMAGE_DIR` | Dossier d'images produits; défaut `backend/uploads/products` |
 | `GALLERY_MEDIA_DIR` | Dossier des médias galerie; défaut `backend/uploads/gallery` |
+| `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Stockage objet S3-compatible. Si les cinq sont définies, les médias vont dans le stockage distant; sinon, ils restent sur disque local. Ne jamais exposer ces clés au frontend. |
+| `GALLERY_TEMP_DIR` | Dossier temporaire pour l'entrée et la conversion des vidéos; défaut `/tmp/kaema-gallery` |
 | `FFMPEG_PATH` | Chemin du binaire FFmpeg; défaut `ffmpeg` dans le `PATH` |
 | `NODE_ENV` | `development` ou `production` |
 
@@ -92,4 +94,4 @@ Pour exécuter le smoke test contre une API déjà démarrée et une base initia
 
 Construire le service en installant les dépendances puis en exécutant `bun run db:generate`, `bun run db:deploy` et `bun run start`. Les migrations doivent être commitées dans `prisma/migrations`; créer la migration initiale avec `bun run db:migrate --name init` pendant le développement.
 
-L'image de production est définie dans `backend/Dockerfile`; elle inclut FFmpeg et exécute `bun run db:deploy` avant le serveur. Le service doit recevoir les variables ci-dessus et un volume persistant couvrant `uploads/products` et `uploads/gallery`. Le build Netlify du frontend a besoin de `VITE_API_URL` défini avec l'URL publique de l'API. Ne pas utiliser de fichiers `.env` ou de contenu du dossier `uploads/` dans les déploiements.
+L'image de production est définie dans `backend/Dockerfile`; elle inclut FFmpeg et exécute `bun run db:deploy` avant le serveur. Le blueprint `render.yaml` configure le service API Render gratuit et demande les secrets au moment du raccordement. Comme le disque du service gratuit est temporaire, configurer le stockage S3-compatible Tigris avec les cinq variables `S3_*`; sans ces variables, les fichiers sont locaux et peuvent disparaître après un redémarrage. Le build Netlify du frontend a besoin de `VITE_API_URL` défini avec l'URL publique de l'API. Ne pas utiliser de fichiers `.env` ou de contenu du dossier `uploads/` dans les déploiements.
